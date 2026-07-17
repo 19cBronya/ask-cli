@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+import json
+import os
+import sys
+import urllib.request
+import urllib.error
+
+CONFIG_DIR = os.path.expanduser("~/.config/ask")
+CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
+
+
+def load_config():
+    try:
+        with open(CONFIG_FILE) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def save_config(cfg):
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    with open(CONFIG_FILE, "w") as f:
+        json.dump(cfg, f, indent=2, ensure_ascii=False)
+
+
+def ask(prompt, api_key, model, endpoint):
+    data = json.dumps({
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": True,
+    }).encode()
+
+    req = urllib.request.Request(
+        f"{endpoint.rstrip('/')}/chat/completions",
+        data,
+        {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(req) as resp:
+            for chunk in resp:
+                for line in chunk.decode("utf-8", errors="ignore").splitlines():
+                    line = line.strip()
+                    if not line.startswith("data: "):
+                        continue
+                    line = line[6:]
+                    if line == "[DONE]":
+                        break
+                    try:
+                        delta = json.loads(line)["choices"][0].get("delta", {})
+                        if "content" in delta:
+                            sys.stdout.write(delta["content"])
+                            sys.stdout.flush()
+                    except (json.JSONDecodeError, KeyError, IndexError):
+                        pass
+        print()
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()[:500]
+        print(f"HTTP {e.code}: {body}", file=sys.stderr)
+        sys.exit(1)
+    except urllib.error.URLError as e:
+        print(f"Network error: {e.reason}", file=sys.stderr)
+        sys.exit(1)
+
+
+def show_help():
+    print("""ask - CLI LLM assistant
+
+Usage:
+  ask <question>                  ask the LLM
+  ask --set-key <api-key>         save API key
+  ask --set-model <model>         set model (default: gpt-4o-mini)
+  ask --set-endpoint <endpoint>   set API endpoint (default: https://api.openai.com/v1)
+  ask --help                      show this help
+
+API key can also be set via OPENAI_API_KEY environment variable.
+Config file: """ + CONFIG_FILE)
+
+
+def main():
+    cfg = load_config()
+
+    if len(sys.argv) < 2:
+        show_help()
+        sys.exit(1)
+
+    arg = sys.argv[1]
+
+    if arg in ("--help", "-h"):
+        show_help()
+        sys.exit(0)
+
+    if arg == "--set-key":
+        if len(sys.argv) < 3:
+            print("Error: missing API key", file=sys.stderr)
+            sys.exit(1)
+        cfg["api_key"] = sys.argv[2].strip()
+        save_config(cfg)
+        print("API key saved.")
+        sys.exit(0)
+
+    if arg == "--set-model":
+        if len(sys.argv) < 3:
+            print("Error: missing model name", file=sys.stderr)
+            sys.exit(1)
+        cfg["model"] = sys.argv[2].strip()
+        save_config(cfg)
+        print(f"Model set to: {sys.argv[2]}")
+        sys.exit(0)
+
+    if arg == "--set-endpoint":
+        if len(sys.argv) < 3:
+            print("Error: missing endpoint URL", file=sys.stderr)
+            sys.exit(1)
+        cfg["endpoint"] = sys.argv[2].strip()
+        save_config(cfg)
+        print(f"Endpoint set to: {sys.argv[2]}")
+        sys.exit(0)
+
+    api_key = cfg.get("api_key") or os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        print("Error: no API key. Set with 'ask --set-key <key>'.", file=sys.stderr)
+        sys.exit(1)
+
+    model = cfg.get("model", "gpt-4o-mini")
+    endpoint = cfg.get("endpoint", "https://api.openai.com/v1")
+    prompt = " ".join(sys.argv[1:])
+
+    ask(prompt, api_key, model, endpoint)
+
+
+if __name__ == "__main__":
+    main()
