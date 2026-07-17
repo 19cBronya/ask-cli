@@ -17,15 +17,11 @@ ask() {
     local prompt body sys_msg
     prompt=$(json_escape "$*")
     case "${VERBOSE:-low}" in
-        low)    sys_msg=$(json_escape "回答尽量简短，1-3句话，不要多余解释。");;
-        medium) sys_msg=$(json_escape "回答可以包含要点，但保持简洁。");;
-        high)   sys_msg="";;
+        low)    sys_msg=$(json_escape "回答尽量简短，1-3句话，不要多余解释。不要用Markdown格式和代码块。");;
+        medium) sys_msg=$(json_escape "回答可以包含要点，但保持简洁。不要用Markdown格式和代码块。");;
+        high)   sys_msg=$(json_escape "不要使用Markdown格式和代码块。");;
     esac
-    if [ -n "$sys_msg" ]; then
-        body="{\"model\":\"${MODEL:-gpt-4o-mini}\",\"messages\":[{\"role\":\"system\",\"content\":\"$sys_msg\"},{\"role\":\"user\",\"content\":\"$prompt\"}],\"stream\":true}"
-    else
-        body="{\"model\":\"${MODEL:-gpt-4o-mini}\",\"messages\":[{\"role\":\"user\",\"content\":\"$prompt\"}],\"stream\":true}"
-    fi
+    body="{\"model\":\"${MODEL:-gpt-4o-mini}\",\"messages\":[{\"role\":\"system\",\"content\":\"$sys_msg\"},{\"role\":\"user\",\"content\":\"$prompt\"}],\"stream\":true}"
 
     curl -sS --no-buffer "${ENDPOINT%/}/chat/completions" \
         -H "Authorization: Bearer $API_KEY" \
