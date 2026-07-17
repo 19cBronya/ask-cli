@@ -16,7 +16,7 @@ json_escape() {
 ask() {
     local prompt body sys_msg
     prompt=$(json_escape "$*")
-    case "${VERBOSE:-low}" in
+    case "${VERBOSE:-medium}" in
         low)    sys_msg=$(json_escape "回答尽量简短，1-3句话，不要多余解释。不要用Markdown格式和代码块。");;
         medium) sys_msg=$(json_escape "回答可以包含要点，但保持简洁。不要用Markdown格式和代码块。");;
         high)   sys_msg=$(json_escape "不要使用Markdown格式和代码块。");;
@@ -40,14 +40,16 @@ help() {
 ask - CLI LLM assistant
 
 Usage:
-  ask <question>                  ask the LLM
-  ask --set-key <api-key>         save API key
-  ask --set-model <model>         set model
-  ask --set-endpoint <endpoint>   set API endpoint
-  ask --set-verbose low|medium|high  set verbosity (default: low)
-  ask --help                       show this help
+  ask <question>
 
-API key can also set via env: ASK_API_KEY
+Config:
+  ask -k <key>          set API key          (--set-key)
+  ask -m <model>        set model            (--set-model)
+  ask -e <endpoint>     set API endpoint     (--set-endpoint)
+  ask -v low|medium|high set verbosity (default: medium) (--set-verbose)
+  ask -h                show this help       (--help)
+
+API key can also be set via env: ASK_API_KEY
 Config file: ~/.config/ask/config
 EOF
 }
@@ -57,24 +59,24 @@ load_cfg
 [ $# -lt 1 ] && { help; exit 1; }
 
 case "$1" in
-    --help|-h) help; exit 0 ;;
-    --set-key)
+    -h|--help) help; exit 0 ;;
+    -k|--set-key)
         [ $# -lt 2 ] && { echo "Error: missing key" >&2; exit 1; }
         mkdir -p "$(dirname "$CONFIG")"
         echo "API_KEY=\"$2\"" >"$CONFIG"
         echo "API key saved."
         ;;
-    --set-model)
+    -m|--set-model)
         [ $# -lt 2 ] && { echo "Error: missing model" >&2; exit 1; }
         save_cfg MODEL "$2"
         echo "Model set to: $2"
         ;;
-    --set-endpoint)
+    -e|--set-endpoint)
         [ $# -lt 2 ] && { echo "Error: missing endpoint" >&2; exit 1; }
         save_cfg ENDPOINT "$2"
         echo "Endpoint set to: $2"
         ;;
-    --set-verbose)
+    -v|--set-verbose)
         [ $# -lt 2 ] && { echo "Error: missing level (low|medium|high)" >&2; exit 1; }
         case "$2" in low|medium|high) ;; *) echo "Error: must be low, medium, or high" >&2; exit 1 ;; esac
         save_cfg VERBOSE "$2"
@@ -82,7 +84,7 @@ case "$1" in
         ;;
     *)
         API_KEY="${API_KEY:-${ASK_API_KEY:-}}"
-        [ -z "$API_KEY" ] && { echo "Error: no API key. Set with 'ask --set-key <key>'." >&2; exit 1; }
+        [ -z "$API_KEY" ] && { echo "Error: no API key. Set with 'ask -k <key>'." >&2; exit 1; }
         ask "$@"
         ;;
 esac
