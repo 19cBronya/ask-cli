@@ -1,136 +1,76 @@
-#!/usr/bin/env python3
-import json
-import os
-import sys
-import urllib.request
-import urllib.error
+#!/usr/bin/env bash
+set -euo pipefail
 
-CONFIG_DIR = os.path.expanduser("~/.config/ask")
-CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
+CONFIG="$HOME/.config/ask/config"
 
+load_cfg() { [ -f "$CONFIG" ] && source "$CONFIG" || true; }
+save_cfg()  { echo "$1=\"$2\"" >>"$CONFIG"; }
 
-def load_config():
-    try:
-        with open(CONFIG_FILE) as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+json_escape() {
+    local str="$1"
+    str="${str//\\/\\\\}"
+    str="${str//\"/\\\"}"
+    printf '%s' "$str"
+}
 
+ask() {
+    local prompt body
+    prompt=$(json_escape "$*")
+    body="{\"model\":\"${MODEL:-gpt-4o-mini}\",\"messages\":[{\"role\":\"user\",\"content\":\"$prompt\"}],\"stream\":true}"
 
-def save_config(cfg):
-    os.makedirs(CONFIG_DIR, exist_ok=True)
-    with open(CONFIG_FILE, "w") as f:
-        json.dump(cfg, f, indent=2, ensure_ascii=False)
+    curl -sS --no-buffer "${ENDPOINT%/}/chat/completions" \
+        -H "Authorization: Bearer $API_KEY" \
+        -H "Content-Type: application/json" \
+        -d "$body" | while IFS= read -r line; do
+        line="${line#data: }"
+        [ "$line" = "[DONE]" ] && break
+        content=$(printf '%s' "$line" | sed -n 's/.*"content":"\([^"]*\)".*/\1/p')
+        [ -n "$content" ] && printf '%b' "$content"
+    done
+    echo
+}
 
-
-def ask(prompt, api_key, model, endpoint):
-    data = json.dumps({
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-        "stream": True,
-    }).encode()
-
-    req = urllib.request.Request(
-        f"{endpoint.rstrip('/')}/chat/completions",
-        data,
-        {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-    )
-
-    try:
-        with urllib.request.urlopen(req) as resp:
-            for chunk in resp:
-                for line in chunk.decode("utf-8", errors="ignore").splitlines():
-                    line = line.strip()
-                    if not line.startswith("data: "):
-                        continue
-                    line = line[6:]
-                    if line == "[DONE]":
-                        break
-                    try:
-                        delta = json.loads(line)["choices"][0].get("delta", {})
-                        if delta.get("content"):
-                            sys.stdout.write(delta["content"])
-                            sys.stdout.flush()
-                    except (json.JSONDecodeError, KeyError, IndexError):
-                        pass
-        print()
-    except urllib.error.HTTPError as e:
-        body = e.read().decode()[:500]
-        print(f"HTTP {e.code}: {body}", file=sys.stderr)
-        sys.exit(1)
-    except urllib.error.URLError as e:
-        print(f"Network error: {e.reason}", file=sys.stderr)
-        sys.exit(1)
-
-
-def show_help():
-    print("""ask - CLI LLM assistant
+help() {
+    cat <<'EOF'
+ask - CLI LLM assistant
 
 Usage:
   ask <question>                  ask the LLM
   ask --set-key <api-key>         save API key
-  ask --set-model <model>         set model (default: gpt-4o-mini)
-  ask --set-endpoint <endpoint>   set API endpoint (default: https://api.openai.com/v1)
+  ask --set-model <model>         set model
+  ask --set-endpoint <endpoint>   set API endpoint
   ask --help                      show this help
 
-API key can also be set via OPENAI_API_KEY environment variable.
-Config file: """ + CONFIG_FILE)
+API key can also set via env: ASK_API_KEY
+Config file: ~/.config/ask/config
+EOF
+}
 
+# ── main ──
+load_cfg
+[ $# -lt 1 ] && { help; exit 1; }
 
-def main():
-    cfg = load_config()
-
-    if len(sys.argv) < 2:
-        show_help()
-        sys.exit(1)
-
-    arg = sys.argv[1]
-
-    if arg in ("--help", "-h"):
-        show_help()
-        sys.exit(0)
-
-    if arg == "--set-key":
-        if len(sys.argv) < 3:
-            print("Error: missing API key", file=sys.stderr)
-            sys.exit(1)
-        cfg["api_key"] = sys.argv[2].strip()
-        save_config(cfg)
-        print("API key saved.")
-        sys.exit(0)
-
-    if arg == "--set-model":
-        if len(sys.argv) < 3:
-            print("Error: missing model name", file=sys.stderr)
-            sys.exit(1)
-        cfg["model"] = sys.argv[2].strip()
-        save_config(cfg)
-        print(f"Model set to: {sys.argv[2]}")
-        sys.exit(0)
-
-    if arg == "--set-endpoint":
-        if len(sys.argv) < 3:
-            print("Error: missing endpoint URL", file=sys.stderr)
-            sys.exit(1)
-        cfg["endpoint"] = sys.argv[2].strip()
-        save_config(cfg)
-        print(f"Endpoint set to: {sys.argv[2]}")
-        sys.exit(0)
-
-    api_key = cfg.get("api_key") or os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        print("Error: no API key. Set with 'ask --set-key <key>'.", file=sys.stderr)
-        sys.exit(1)
-
-    model = cfg.get("model", "gpt-4o-mini")
-    endpoint = cfg.get("endpoint", "https://api.openai.com/v1")
-    prompt = " ".join(sys.argv[1:])
-
-    ask(prompt, api_key, model, endpoint)
-
-
-if __name__ == "__main__":
-    main()
+case "$1" in
+    --help|-h) help; exit 0 ;;
+    --set-key)
+        [ $# -lt 2 ] && { echo "Error: missing key" >&2; exit 1; }
+        mkdir -p "$(dirname "$CONFIG")"
+        echo "API_KEY=\"$2\"" >"$CONFIG"
+        echo "API key saved."
+        ;;
+    --set-model)
+        [ $# -lt 2 ] && { echo "Error: missing model" >&2; exit 1; }
+        save_cfg MODEL "$2"
+        echo "Model set to: $2"
+        ;;
+    --set-endpoint)
+        [ $# -lt 2 ] && { echo "Error: missing endpoint" >&2; exit 1; }
+        save_cfg ENDPOINT "$2"
+        echo "Endpoint set to: $2"
+        ;;
+    *)
+        API_KEY="${API_KEY:-${ASK_API_KEY:-}}"
+        [ -z "$API_KEY" ] && { echo "Error: no API key. Set with 'ask --set-key <key>'." >&2; exit 1; }
+        ask "$@"
+        ;;
+esac
