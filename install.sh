@@ -13,6 +13,7 @@ chmod +x "${INSTALL_PATH}"
 # add to shell profiles
 add_path() {
     local rc="$1"
+    [ -f "$rc" ] || return 0
     grep -q '$HOME/.local/bin' "$rc" 2>/dev/null && return 0
     echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$rc"
 }
