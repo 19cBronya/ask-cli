@@ -10,9 +10,16 @@ mkdir -p "${INSTALL_DIR}"
 curl -sSL -o "${INSTALL_PATH}" "${RAW}"
 chmod +x "${INSTALL_PATH}"
 
-if ! grep -q '$HOME/.local/bin' ~/.bashrc 2>/dev/null; then
-    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-fi
+# add to shell profiles
+add_path() {
+    local rc="$1"
+    [ -f "$rc" ] || return 0
+    grep -q '$HOME/.local/bin' "$rc" 2>/dev/null && return 0
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$rc"
+}
+
+add_path ~/.bashrc
+add_path ~/.zshrc
 
 echo "ask installed to ${INSTALL_PATH}"
 echo
